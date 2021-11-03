@@ -117,13 +117,11 @@ gbm <- train( classe ~ ., data = trainClasse, method="gbm",  preProc=c("center",
 #ada52 <- train( classe ~ ., data = trainingBBc, method="ada",  preProc=c("center","scale"), tuneGrid = ada.grid)
 #lda52 <- train( classe ~ ., data = trainingBBc, method="lda",  preProc=c("center","scale"))
 ```
+#### Predict to determine Out-of-set Accuracy
+
 Now, we will take the testing data that we derived from the full Training set and use it to test our models.
 The idea here is to find out how good our out-of-set error is.
 ```{r testing, echo=TRUE, cache=TRUE}
-predRF <- predict(rf, newdata = testClasse[,1:97])
-predGBM <- predict(gbm, newdata = testClasse[,1:97])
-predRF_PCA <- predict(rf_pca, newdata = testClasse[,1:97])
-# Ensemble these 3 models.
 predRF <- predict(rf, newdata = testClasse[,1:97])
 predGBM <- predict(gbm, newdata = testClasse[,1:97])
 predRF_PCA <- predict(rf_pca, newdata = testClasse[,1:97])
@@ -143,7 +141,7 @@ combModelFit <- train(classe ~ ., method="rf", data=predDF)
 predCombModel <- predict(combModelFit, newdata = testClasse[,1:97])
 cm_CombModel <- confusionMatrix(predCombModel,testClasse$classe)
 accuracyMatrix <- data.frame(cm_rf[3]$overall[1], cm_gbm[3]$overall[1], cm_rf_pca[3]$overall[1], cm_CombModel[3]$overall[1])
-names(accuracyMatrix) <- c("Random Forests","GBM","Random Forests<br/>with PCA","Ensemble")
+names(accuracyMatrix) <- c("Random Forests","GBM","Random Forests with PCA","Ensemble")
 ```
 Accuracy of the base models and the ensemble model are: 
 ```{r showAccuracy, echo=TRUE, cache=TRUE}
@@ -151,6 +149,8 @@ library(xtable)
 print(accuracyMatrix)
 ```
 The Random Forests definitely has the superior accuracy here, and using ensembling doesn't seem to help here.
+
+#### Predict using Provided Test Data as Validation Set
 
 Now, we will take the 3 models and use them to predict values for the given validation data,
 originally labelled "pml-testing'.  

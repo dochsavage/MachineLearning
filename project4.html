@@ -246,12 +246,11 @@ gbm &lt;- train( classe ~ ., data = trainClasse, method=&quot;gbm&quot;,  prePro
 #ada.grid &lt;- expand.grid(.iter = c(50, 100),.maxdepth = c(4, 8),.nu = c(0.1, 1))
 #ada52 &lt;- train( classe ~ ., data = trainingBBc, method=&quot;ada&quot;,  preProc=c(&quot;center&quot;,&quot;scale&quot;), tuneGrid = ada.grid)
 #lda52 &lt;- train( classe ~ ., data = trainingBBc, method=&quot;lda&quot;,  preProc=c(&quot;center&quot;,&quot;scale&quot;))</code></pre>
+</div>
+<div id="predict-to-determine-out-of-set-accuracy" class="section level4">
+<h4>Predict to determine Out-of-set Accuracy</h4>
 <p>Now, we will take the testing data that we derived from the full Training set and use it to test our models. The idea here is to find out how good our out-of-set error is.</p>
 <pre class="r"><code>predRF &lt;- predict(rf, newdata = testClasse[,1:97])
-predGBM &lt;- predict(gbm, newdata = testClasse[,1:97])
-predRF_PCA &lt;- predict(rf_pca, newdata = testClasse[,1:97])
-# Ensemble these 3 models.
-predRF &lt;- predict(rf, newdata = testClasse[,1:97])
 predGBM &lt;- predict(gbm, newdata = testClasse[,1:97])
 predRF_PCA &lt;- predict(rf_pca, newdata = testClasse[,1:97])</code></pre>
 <p>So, let’s compare the accuracy of these models and their ensemble model.</p>
@@ -266,13 +265,16 @@ combModelFit &lt;- train(classe ~ ., method=&quot;rf&quot;, data=predDF)
 predCombModel &lt;- predict(combModelFit, newdata = testClasse[,1:97])
 cm_CombModel &lt;- confusionMatrix(predCombModel,testClasse$classe)
 accuracyMatrix &lt;- data.frame(cm_rf[3]$overall[1], cm_gbm[3]$overall[1], cm_rf_pca[3]$overall[1], cm_CombModel[3]$overall[1])
-names(accuracyMatrix) &lt;- c(&quot;Random Forests&quot;,&quot;GBM&quot;,&quot;Random Forests&lt;br/&gt;with PCA&quot;,&quot;Ensemble&quot;)</code></pre>
+names(accuracyMatrix) &lt;- c(&quot;Random Forests&quot;,&quot;GBM&quot;,&quot;Random Forests with PCA&quot;,&quot;Ensemble&quot;)</code></pre>
 <p>Accuracy of the base models and the ensemble model are:</p>
 <pre class="r"><code>library(xtable)
 print(accuracyMatrix)</code></pre>
 <pre><code>##          Random Forests      GBM Random Forests with PCA  Ensemble
 ## Accuracy      0.9936273 0.953352               0.9653327 0.9936273</code></pre>
 <p>The Random Forests definitely has the superior accuracy here, and using ensembling doesn’t seem to help here.</p>
+</div>
+<div id="predict-using-provided-test-data-as-validation-set" class="section level4">
+<h4>Predict using Provided Test Data as Validation Set</h4>
 <p>Now, we will take the 3 models and use them to predict values for the given validation data, originally labelled “pml-testing’.<br />
 But first, we will load and clean that original data.</p>
 <pre class="r"><code># Load &amp; Process the Validation data
