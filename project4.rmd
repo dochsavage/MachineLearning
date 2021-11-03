@@ -1,0 +1,187 @@
+---
+title: "Effective Barbell Exercise Detection"
+author: "Jeff Murdoch"
+date: "10/25/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(elasticnet)
+library(caret)
+library(hydroGOF)
+library(ggplot2)
+library(dplyr)
+library(devtools)
+library(mgcv)
+library(nlme)
+```
+
+## Exercise Data Evaluation
+
+### Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+```{r loadTrainingData, cache=TRUE}
+trainingDataURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(trainingDataURL, destfile = "pml-training.csv")
+trainingBBRaw <- read.csv("pml-training.csv")
+```
+
+### Cleaning
+
+The raw dataset contains many values that are not numerical or NA, we will replace these values with zeroes, then the numerical text values will be converted to numerical values.  There are also a number of variables that little to no values; by summing up each column, we can identify these empty columns by checking to see if their total is less than 1.  The dependent variable "classe" will be converted to a factor variable to facilitate classification.
+```{r cleanTrainingData, cache=TRUE}
+trainingBBZeroes <- apply(trainingBBRaw[,1:160],2, function(x) ifelse(is.na(x) | x=="" | x=="#DIV/0!", "0",x))
+trainingBBZeroes <- data.frame(trainingBBZeroes)
+#Remove Times and Window-focused columns
+trainingBBNumsOnly <- trainingBBZeroes[,c(1,8:160)]
+trainingBBNumsOnly[,154] <- factor(trainingBBNumsOnly[,154] )
+# Convert the values from strings to numbers. Exclude X and Classe.
+trainingBB <- apply(trainingBBNumsOnly[,2:153],c(1,2), as.numeric)
+trainingBB <- data.frame(trainingBB)
+# Remove variables that are empty, i.e., sum to 0, as approximated by <=1.
+vColSum <- colSums(trainingBB)
+zeroColname <- names(vColSum[vColSum<=1])
+trainingBBfinal <- trainingBB[,!(names(trainingBB) %in% zeroColname)]
+```
+#### Basic Exploration
+
+Let's take this training data and use Principal Component Analysis to identify
+the critical variables that we'll need to focus our training on. 
+```{r exploreData, echo=TRUE, cache=TRUE}
+# Perform PCA on the dataset with both data-centering and scaling.
+pcaComp <- prcomp(trainingBBfinal, scale. = TRUE)
+# OK, let's find out how far out we need to go to get the right number of components.
+# Use the Proportion of Variance in the pcaComp object.
+pcaComp.v <- pcaComp$sdev^2
+pcaComp.prop <- pcaComp.v/sum(pcaComp.v)
+ plot(pcaComp.prop, xlab = "Principal Component",
+      ylab = "Proportion of Variance Explained",
+      type = "b")
+```
+
+Looking at the
+PCA, there are about 15 major variables, but it is difficult to arbitrarily
+assign a cut-off here.  The tail-off seems fairly smooth, so I'm going to keep
+these remaining variables for training.
+
+#### Split and Train
+
+A major objective of this project is being able to not only do prediction on
+the provided "test" data (which has no answer column), but also determine 
+the rough accuracy and/or error of the model(s) trained.
+
+To that end, we'll need to use the 3 datasets approach:
+
+1) Training Dataset
+
+2) Testing Dataset
+
+3) Validation Dataset
+
+Let's split the given Training data into 2 sets:  training and test.
+
+The given "test" data will be redefined as: validation.
+
+```{r exploreData2, echo=TRUE, cache=TRUE}
+trainingBBfinal$classe <- trainingBBNumsOnly$classe
+# Ensure that classe is a factor variable.
+trainingBBfinal[,"classe"] <- factor(trainingBBfinal[,"classe"])
+dim(trainingBBfinal)
+set.seed(12345)
+inTrain <- createDataPartition(y=trainingBBfinal$classe,p=0.8,list=FALSE)
+trainClasse <- trainingBBfinal[inTrain,]
+testClasse  <- trainingBBfinal[-inTrain,]
+```
+
+Now, we will take the training data and use it to train our models.
+Yes, that's a plural.  I am curious about the effectiveness of 3 different
+classification models:
+
+1) Random Forests
+
+2) Random Forests using Principal Component Analysis
+
+3) Gradient Boosting Machine
+
+```{r training, echo=TRUE, cache=TRUE}
+# Warning: Takes about 6 hours.
+rf <- train( classe ~ ., data = trainClasse, method="rf",  preProc=c("center","scale"),verbose = FALSE)
+rf_pca <- train( classe ~ ., data = trainClasse, method="rf",  preProc="pca",verbose = FALSE)
+gbm <- train( classe ~ ., data = trainClasse, method="gbm",  preProc=c("center","scale"),verbose = FALSE)
+# qda only handles 2 factors in target classe. W:"rank deficiency in group"
+#qda52 <- train( classe ~ ., data = trainClasse, method="qda",  preProc=c("center","scale"))
+#ada.grid <- expand.grid(.iter = c(50, 100),.maxdepth = c(4, 8),.nu = c(0.1, 1))
+#ada52 <- train( classe ~ ., data = trainingBBc, method="ada",  preProc=c("center","scale"), tuneGrid = ada.grid)
+#lda52 <- train( classe ~ ., data = trainingBBc, method="lda",  preProc=c("center","scale"))
+```
+Now, we will take the testing data that we derived from the full Training set and use it to test our models.
+The idea here is to find out how good our out-of-set error is.
+```{r testing, echo=TRUE, cache=TRUE}
+predRF <- predict(rf, newdata = testClasse[,1:97])
+predGBM <- predict(gbm, newdata = testClasse[,1:97])
+predRF_PCA <- predict(rf_pca, newdata = testClasse[,1:97])
+# Ensemble these 3 models.
+predRF <- predict(rf, newdata = testClasse[,1:97])
+predGBM <- predict(gbm, newdata = testClasse[,1:97])
+predRF_PCA <- predict(rf_pca, newdata = testClasse[,1:97])
+```
+
+So, let's compare the accuracy of these models and their ensemble model.
+
+```{r accuracy, echo=TRUE, cache=TRUE}
+cm_rf <- confusionMatrix(predRF,testClasse$classe)
+cm_gbm <- confusionMatrix(predGBM,testClasse$classe)
+cm_rf_pca <- confusionMatrix(predRF_PCA,testClasse$classe)
+accuracyMatrix <- data.frame(cm_rf[3]$overall[1], cm_gbm[3]$overall[1], cm_rf_pca[3]$overall[1])
+names(accuracyMatrix) <- c("Random Forests","GBM","Random Forests with PCA")
+
+predDF <- data.frame(predRF,predGBM,predRF_PCA,classe = testClasse$classe)
+combModelFit <- train(classe ~ ., method="rf", data=predDF)
+predCombModel <- predict(combModelFit, newdata = testClasse[,1:97])
+cm_CombModel <- confusionMatrix(predCombModel,testClasse$classe)
+accuracyMatrix <- data.frame(cm_rf[3]$overall[1], cm_gbm[3]$overall[1], cm_rf_pca[3]$overall[1], cm_CombModel[3]$overall[1])
+names(accuracyMatrix) <- c("Random Forests","GBM","Random Forests<br/>with PCA","Ensemble")
+```
+Accuracy of the base models and the ensemble model are: 
+```{r showAccuracy, echo=TRUE, cache=TRUE}
+library(xtable)
+print(accuracyMatrix)
+```
+The Random Forests definitely has the superior accuracy here, and using ensembling doesn't seem to help here.
+
+Now, we will take the 3 models and use them to predict values for the given validation data,
+originally labelled "pml-testing'.  
+But first, we will load and clean that original data.
+```{r validation, echo=TRUE, cache=TRUE}
+# Load & Process the Validation data
+validationDataURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(validationDataURL, destfile = "pml-testing.csv")
+validationBBRaw <- read.csv("pml-testing.csv")
+validationBBZeroes <- apply(validationBBRaw[,1:160],2, function(x) ifelse(is.na(x) | x=="" | x=="#DIV/0!", "0",x))
+validationBBZeroes <- data.frame(validationBBZeroes)
+#Remove Times and Window-focused columns
+validationBBNumsOnly <- validationBBZeroes[,c(1,8:160)]
+validationBBNumsOnly[,154] <- factor(validationBBNumsOnly[,154] )
+# Convert the values from strings to numbers. Exclude X and Classe.
+validationBB <- apply(validationBBNumsOnly[,2:153],c(1,2), as.numeric)
+validationBB <- data.frame(validationBB)
+# Remove variables that are empty, as identified earlier with the training set.
+validationBBfinal <- validationBB[,!(names(validationBB) %in% zeroColname)]
+predValidationRF <- predict(object = rf,newdata = validationBBfinal)
+predValidationGBM <- predict(object = gbm,newdata = validationBBfinal)
+predValidationRFPCA <- predict(object = rf_pca,newdata = validationBBfinal)
+predValidation <- data.frame(predValidationRF,predValidationGBM,predValidationRFPCA)
+```
+How do the final predictions compare against each other?
+```{r finalCompare, echo=FALSE, cache=TRUE}
+predValidation
+```
+Spot on!  Since the accuracy of all 3 models was > 95%, this prediction set is
+perhaps suspiciously coherent.  I suspect a larger test set would result in 
+a few differences, but with this one, all we have is agreement.
+
+
+
